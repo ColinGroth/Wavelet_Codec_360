@@ -1,0 +1,52 @@
+#version 450
+
+#define PI 3.1415926535897932384626433832795
+
+layout (local_size_x = 64) in;
+
+layout (binding = 0, rgba32f) uniform image2D coefficients[16];
+
+layout(binding = 1) uniform Settings {
+	int input_levels;
+	float img_threshold;
+	float if_threshold;
+	int frame_count;
+} settings;
+
+layout(push_constant) uniform PCData {
+	int useHeightFactor;
+};
+
+
+void main()
+{
+	uint idx = gl_GlobalInvocationID.x;
+	ivec2 size = imageSize(coefficients[0]).xy;
+	ivec3 coord = ivec3(idx % size.x, idx / size.x % size.y, idx / (size.x * size.y));
+
+	if (idx >= (size.x * size.y * settings.frame_count)) return;
+
+	int maxLayer = max(findMSB(size.x - 1), findMSB(size.y - 1));
+	int layer = min(maxLayer - max(findMSB(coord.x), findMSB(coord.y)), settings.input_levels);
+
+	float threshold_multiplier = float(settings.input_levels - layer) /
+									float(settings.input_levels);
+
+	float height_factor = 0;
+	if(useHeightFactor == 1){
+		int half_height_level = (size.y >> (layer + 2));
+		height_factor = 1 - sin((coord.y % half_height_level) * PI / half_height_level);
+	}
+
+	vec3 ret = imageLoad(coefficients[coord.z], ivec2(coord)).rgb;
+
+	float threshold =
+	    settings.img_threshold *
+	    (threshold_multiplier * threshold_multiplier) + height_factor * height_factor * threshold_multiplier;
+	if (length(ret) < threshold * 0.5 * length(vec3(1))) {
+		ret = vec3(0);
+	}
+
+	imageStore(coefficients[coord.z], ivec2(coord), vec4(ret, 1));
+
+}

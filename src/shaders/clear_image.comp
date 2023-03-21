@@ -1,0 +1,17 @@
+#version 460
+
+layout (local_size_x = 64) in;
+
+layout (binding = 0, rgba32f) uniform image2D img_in;
+
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    ivec2 size = imageSize(img_in).xy;
+    ivec2 mask_size = size / 32;
+    ivec2 coord = ivec2(idx % size.x, idx / size.x % size.y);
+
+    imageStore(img_in, coord, vec4(0,0,0,1));
+
+}

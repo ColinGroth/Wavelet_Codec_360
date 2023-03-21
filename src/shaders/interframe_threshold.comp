@@ -1,0 +1,64 @@
+#version 450
+
+layout (local_size_x = 64) in;
+
+layout (binding = 0, rgba32f) uniform image2D coefficients[8];
+
+layout(binding = 1) uniform Settings {
+    int input_levels;
+    float img_threshold;
+    float if_threshold;
+    int frame_count;
+} settings;
+
+layout(binding = 2, std430) buffer Normalize {
+    int minsMaxs[];
+};
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    ivec3 size = ivec3(imageSize(coefficients[0]).xy, settings.frame_count);
+    ivec3 coord = ivec3(idx % size.x, idx / size.x % size.y, idx / (size.x * size.y));
+
+    if (idx >= (size.x * size.y * settings.frame_count)) return;
+
+    int maxLayer = findMSB(settings.frame_count - 1) + 1;
+    int layer = maxLayer - findMSB(coord.z) - 1; // MSB(0) = -1
+
+    vec3 ret = imageLoad(coefficients[coord.z], ivec2(coord)).rgb;
+
+    float threshold_multiplier = float(maxLayer - layer) / float(maxLayer);
+    float threshold =
+                settings.if_threshold * threshold_multiplier;
+
+    if (length(ret) < threshold * 0.5 * length(vec3(1))) {
+        ret = vec3(0);
+    }
+
+    imageStore(coefficients[coord.z], ivec2(coord), vec4(ret, 1));
+
+
+    int isWvltSide = min(
+                        max(coord.x / (size.x >> settings.input_levels),
+                            coord.y / (size.y >> settings.input_levels)),
+                        1);
+
+    //max values
+    atomicMax(minsMaxs[3 + 6 * isWvltSide + 12 * coord.z], floatBitsToInt(ret.r));
+    atomicMax(minsMaxs[4 + 6 * isWvltSide + 12 * coord.z], floatBitsToInt(ret.g));
+    atomicMax(minsMaxs[5 + 6 * isWvltSide + 12 * coord.z], floatBitsToInt(ret.b));
+
+    //min values
+    if (ret.r < 0){
+        atomicMax(minsMaxs[6 * isWvltSide + 12 * coord.z], floatBitsToInt(-ret.r));
+    }
+    if (ret.g < 0){
+        atomicMax(minsMaxs[1 + 6 * isWvltSide + 12 * coord.z], floatBitsToInt(-ret.g));
+    }
+    if (ret.b < 0){
+        atomicMax(minsMaxs[2 + 6 * isWvltSide + 12 * coord.z], floatBitsToInt(-ret.b));
+    }
+
+
+}

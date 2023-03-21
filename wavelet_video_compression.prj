@@ -1,0 +1,98 @@
+[Project]
+	modules = cdf_computation
+	          utils/cdf_computation
+	          wavelet_transform
+	          misc
+	          pipelines
+	          wavelet_video_compression;
+
+	rendergraph = rendergraphs/wavelet_video_compression.rg;
+
+[WaveletTransform]
+	type        = decomposition;
+	input       = source_image;
+	pass        = wavelet/wavelet/rp;
+	output      = img_wavelet;
+	tmp         = img_wavelet;
+	kernel_name = kernel;
+
+## Haar wavelet
+#	lp_kernel   = 0 0 0 0 0.7071067811865476 0.7071067811865476 0 0 0;
+#    hp_kernel   = 0 0 0 0 -0.7071067811865476 0.7071067811865476 0 0 0;
+
+    # CDF 9/7
+    lp_kernel = 0.0
+                0.03782845550726404
+                -0.023849465019556843
+                -0.11062440441843718
+                0.37740285561283066
+                0.8526986790088938
+                0.37740285561283066
+                -0.11062440441843718
+                -0.023849465019556843
+                0.03782845550726404;
+
+    hp_kernel = 0.0
+                -0.06453888262869706
+                0.04068941760916406
+                0.41809227322161724
+                -0.7884856164055829
+                0.41809227322161724
+                0.04068941760916406
+                -0.06453888262869706
+                0.0
+                0.0;
+
+[WaveletTransform]
+	type        = reconstruction;
+	input       = img_wavelet;
+	pass        = inverse/inverse_wavelet/rp;
+	output      = imgui/output;
+	tmp         = img_wavelet;
+	kernel_name = synthesis_kernel;
+
+## Haar wavelet
+#	lp_kernel   = 0 0 0 0 0.7071067811865476 0.7071067811865476 0 0 0;
+#    hp_kernel   = 0 0 0 0 0.7071067811865476 -0.7071067811865476 0 0 0;
+
+	# CDF 9/7
+lp_kernel = 0.0
+              -0.06453888262869706
+               -0.04068941760916406
+               0.41809227322161724
+               0.7884856164055829
+               0.41809227322161724
+               -0.04068941760916406
+              -0.06453888262869706
+               0.0
+               0.0;
+
+hp_kernel = 0.0
+              -0.03782845550726404
+              -0.023849465019556843
+               0.11062440441843718
+               0.37740285561283066
+               -0.8526986790088938
+               0.37740285561283066
+               0.11062440441843718
+               -0.023849465019556843
+               -0.03782845550726404;
+
+[WaveletTransform]
+	type        = interframe;
+	input       = source_image;  # only debug
+	pass        = interframe/rp;
+	output      = img_wavelet;
+	tmp         = img_wavelet;
+
+
+[WaveletTransformTest]
+## input directory with the individual frames of the video (.jpg or .png [rgb24])
+    image_directory = ../../../some/path/to/frames/;
+
+###   Note: the image resolution must be set in wavelet_video_compression.rg !
+
+[VideoCompression]
+## the output path relative to the working directory
+    filepath = ../wavelet-videos/test.wc;
+

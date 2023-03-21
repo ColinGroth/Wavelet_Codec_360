@@ -1,0 +1,124 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+
+layout (local_size_x = 64) in;
+
+layout (binding = 0) uniform sampler2D img_wavelets[8];
+
+struct CompressedWavelet
+{
+    uint index;
+    uint coefficients;
+};
+
+layout(binding = 1, std430) buffer storage {
+    CompressedWavelet wavelets[];
+};
+
+layout(binding = 2, std430) buffer Normalize {
+    float minsMaxs[];
+};
+
+layout(binding = 3, std430) buffer Clustering {
+    uint block_size;
+    uint block_ends[];
+};
+
+layout (set = 1, binding = 0) uniform sampler2D pdf;
+layout (set = 1, binding = 1) uniform sampler2D cdf;
+
+layout(push_constant) uniform PCData {
+    int level;
+    int max_level;
+    int frame_idx;
+};
+
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    ivec2 size = ivec2(textureSize(img_wavelets[0], 0).xy);
+    ivec2 wsize = size >> level;
+    ivec2 coord = ivec2(int(idx % wsize.x), int(idx / wsize.x));
+
+    if (level == max_level){
+        if (idx < (wsize.x * wsize.y)){
+            vec3 coeffs = texelFetch(img_wavelets[frame_idx], coord, 0).rgb;
+
+            vec3 mins = vec3(-minsMaxs[12 * frame_idx], -minsMaxs[1 + 12 * frame_idx], -minsMaxs[2 + 12 * frame_idx]);
+            vec3 maxs = vec3(minsMaxs[3 + 12 * frame_idx], minsMaxs[4 + 12 * frame_idx], minsMaxs[5 + 12 * frame_idx]);
+            coeffs = (coeffs - mins) / (maxs - mins);
+
+            wavelets[idx].index        = idx + size.x * size.y * frame_idx;
+            wavelets[idx].coefficients = int(coeffs.r * 255);
+            wavelets[idx].coefficients |= (int(coeffs.g * 255) << 8);
+            wavelets[idx].coefficients |= (int(coeffs.b * 255) << 16);
+        }
+    } else {
+        if (idx < (wsize.x * wsize.y) && texelFetch(pdf, coord, 0).r > 0){
+            ///
+            ///  find block_ends values
+            ///
+            uint texels[33];  //idx must be a constant ..
+            ivec2 bcoord = ivec2(coord.x % block_size, coord.y % block_size);
+            uint widx = 0;
+            if (coord.y >= block_size){
+                widx = uint(texelFetch(cdf, ivec2(coord.y - bcoord.y - 1, size.y), 0).r);
+            }
+            texels[0] = widx;
+            for (int i = 0; i < bcoord.y; ++i){
+                texels[i+1] = uint(texelFetch(cdf, ivec2(coord.x - bcoord.x + block_size - 1, coord.y - bcoord.y + i), 0).r);
+                widx += texels[i+1];
+            }
+            texels[bcoord.y + 1] = uint(texelFetch(cdf, ivec2(coord.x, coord.y), 0).r);
+            widx += texels[bcoord.y + 1];
+            for (int i = bcoord.y + 1; i < block_size; ++i){
+                texels[i+1] = uint(texelFetch(cdf, ivec2(coord.x - bcoord.x - 1, coord.y - bcoord.y + i), 0).r);
+                widx += texels[i+1];
+            }
+
+            ivec2 half_size = wsize >> 1;
+            ivec2 half_coord = coord % half_size;
+            uint bidx;
+
+            if (coord.y < half_size.y){
+                bidx = int(half_coord.y / block_size)
+                * int(half_size.x / block_size)
+                + int(half_coord.x / block_size);
+            } else {
+                half_coord.x = coord.x;
+                bidx = int(half_coord.y / block_size)
+                * int(wsize.x / block_size)
+                + int(half_coord.x / block_size);
+                bidx += half_size.x / block_size * (half_size.y / block_size);
+            }
+
+            if (block_ends[bidx] == 0){
+                uint block_end = widx;
+                for (int i = 0; i <= bcoord.y; ++i){
+                    block_end -= texels[i+1]
+                    - uint(texelFetch(cdf, ivec2(coord.x - bcoord.x - 1, coord.y - bcoord.y + i), 0).r);
+                }
+                block_ends[bidx] = block_end;
+            }
+
+            ///
+            ///  save wavelet values
+            ///
+            vec3 coeffs = texelFetch(img_wavelets[frame_idx], coord, 0).rgb;
+
+            //  mins: sign bit was flipped (in threshold shader)
+            vec3 mins = vec3(-minsMaxs[6 + 12 * frame_idx], -minsMaxs[7 + 12 * frame_idx], -minsMaxs[8 + 12 * frame_idx]);
+            vec3 maxs = vec3(minsMaxs[9 + 12 * frame_idx], minsMaxs[10 + 12 * frame_idx], minsMaxs[11 + 12 * frame_idx]);
+            coeffs = (coeffs - mins) / (maxs - mins);
+
+            wavelets[widx].index        = idx + size.x * size.y * frame_idx;
+            wavelets[widx].coefficients = int(coeffs.r * 255);
+            wavelets[widx].coefficients |= (int(coeffs.g * 255) << 8);
+            wavelets[widx].coefficients |= (int(coeffs.b * 255) << 16);
+        }
+    }
+
+
+}

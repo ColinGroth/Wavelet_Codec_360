@@ -1,0 +1,65 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout (local_size_x = 64) in;
+
+layout(binding = 0, rgba32f) uniform image2D wavelet_transformed[16];
+
+layout(push_constant) uniform PCData {
+	int level;
+	int frame_count;
+};
+
+
+int wrap(int co, int size)
+{
+	co = co % size;
+	if (co < 0) {
+		co = (size - co) - 1;
+	}
+	return co;
+}
+
+void main()
+{
+	uint  idx   = gl_GlobalInvocationID.x;
+	ivec3 size  = ivec3(imageSize(wavelet_transformed[0]).xy, frame_count >> level);
+	ivec3 coord = ivec3(idx % size.x, idx / size.x % size.y, idx / (size.x * size.y));
+
+	float kernel[6];
+	//lp
+	kernel[0]  = 0;
+	kernel[1]  = 0.5;
+	kernel[2]  = 0.5;
+	//hp
+	kernel[3] = 0;
+	kernel[4] = -0.5;
+	kernel[5] = 0.5;
+
+	int is_hp_side = coord.z / int(size.z * 0.5);
+
+	if (idx >= (size.x * size.y * size.z)) return;
+
+	int coord_half = coord.z % int(size.z * 0.5);
+	int co = coord_half;
+
+	co *= 2;
+	int offset = int(size.z * 0.5 * is_hp_side);
+
+	vec3 values[3];
+	for (int i = 0; i < 3; ++i) {
+		int nco = co;
+		nco += i - 1;
+		nco = wrap(nco, size.z);
+
+		values[i] = imageLoad(wavelet_transformed[int(nco + frame_count * (level % 2))], ivec2(coord)).rgb;
+	}
+
+	vec3 ret = vec3(0);
+	for (int i = 0; i < 3; ++i) {
+
+		ret += values[i] * kernel[i + 3 * is_hp_side];
+	}
+
+	imageStore(wavelet_transformed[int(coord_half + offset + frame_count * ((level + 1) % 2))], ivec2(coord), vec4(ret, 1));
+}

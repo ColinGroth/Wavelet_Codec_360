@@ -35,8 +35,9 @@ The framework is publicly available under the following links:
 - For the core framework: https://git.cg.cs.tu-bs.de/Sascha/mtstudio
 - For the Vulkan renderer: https://git.cg.cs.tu-bs.de/Sascha/vkrenderer
 
-Please note, that the framework has no proper documentation yet and that we cannot handle all question on how to use it.
-Although our implementation includes the framework-specific function calls you may want to replace them with your own GPU backend using Vulkan, OpenGL or similar. 
+Please note, that the framework has no proper documentation yet and that we cannot handle all question on how to use it. 
+Also, the module to compute the cumulative distribution function (cdf) can not be provided at this point and has to be implemented by yourself. We are confident to provide all utility modules in the near future.    
+However, although our implementation includes the framework-specific function calls you may want to replace them with your own GPU backend using Vulkan, OpenGL or similar. 
 
 ## Citation
 If you use our code for your publications, please cite our [paper](https://graphics.tu-bs.de/upload/publications/Groth2023Wavelets_CR.pdf) using the following BibTeX:

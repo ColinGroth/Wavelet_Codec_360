@@ -1,0 +1,122 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(constant_id = 0) const uint kernel_size = 10;
+
+layout (local_size_x = 64) in;
+
+layout(binding = 0, rgba32f) uniform image2D wavelet_transformed[16];
+
+layout(binding = 1) buffer Kernel {
+    float kernel[20];
+};
+
+#ifdef INVERSE
+layout(binding = 2) buffer block_mask{
+    int mask_starts[16];
+    int blocks[];
+};
+#endif
+
+
+layout(push_constant) uniform PCData {
+    int invocation;
+    int frame_count;
+    int block_size;
+    int reconstructAll;
+};
+
+int wrap(int co, int size)
+{
+    co = co % size;
+    if (co < 0) {
+        co = (size - co) - 1;
+    }
+    return co;
+}
+
+void main()
+{
+    int level       = invocation / 2;
+    int axis        = (invocation + 1) % 2;
+    int next_axis   = invocation % 2;
+
+    uint  idx   = gl_GlobalInvocationID.x;
+    ivec2 size  = ivec2(imageSize(wavelet_transformed[0]).xy) >> level;
+    ivec3 coord = ivec3(idx % size.x, idx / size.x % size.y, idx / (size.x * size.y));
+
+#ifdef INVERSE
+    if(reconstructAll == 1){
+        if (idx >= size.x * size.y) return;
+    } else {
+        if (int(idx / (block_size * block_size)) >= mask_starts[level] - mask_starts[level + 1]) return;
+
+        ivec2 bcoord = ivec2(idx % block_size, idx / block_size % block_size);
+        uint b_idx = blocks[mask_starts[level + 1] + int(idx / (block_size * block_size))];
+        coord = ivec3(b_idx * block_size % size.x + bcoord.x,
+        int(b_idx * block_size / size.x) * block_size + bcoord.y, 1);
+        if(next_axis == 1){
+            int isOdd = coord.y % 2;
+            coord.y /= 2;
+            coord.y += size.y / 2 * isOdd;
+        }
+    }
+#else
+    if (idx >= (size.x * size.y * frame_count)) return;
+
+    int is_hp_side = coord[axis] / int(size[axis] * 0.5);
+#endif
+
+
+    ivec2 coord_half = ivec2(coord);
+    coord_half[axis] = coord[axis] % int(size[axis] * 0.5);
+    ivec2 co = coord_half;
+
+#ifndef INVERSE
+    co[axis] *= 2;
+    ivec2 offset = ivec2(size * 0.5) * is_hp_side;
+    offset[next_axis] = 0;
+#endif
+
+#ifdef INVERSE
+    co = ivec2(coord);
+    vec3 values_lp[kernel_size];
+#endif
+    vec3 values[kernel_size];
+    for (int i = 0; i < kernel_size; ++i) {
+        ivec2 nco = co;
+        nco[axis] += i - int((kernel_size + 1) / 2) + 1;
+        nco[axis] = wrap(nco[axis], size[axis]);
+
+#ifdef INVERSE
+        ivec2 offset = ivec2(size * 0.5);
+        offset[next_axis] = 0;
+        values_lp[i] = vec3(0);
+        values[i] = vec3(0);
+        if ((nco[axis] % 2) == 1) {
+            nco[axis] = nco[axis] / 2;
+            values_lp[i] = imageLoad(wavelet_transformed[axis], nco).rgb;
+            nco += offset;
+            values[i] = imageLoad(wavelet_transformed[axis], nco).rgb;
+        }
+#else
+        values[i] = imageLoad(wavelet_transformed[coord.z + frame_count * next_axis], nco).rgb;
+#endif
+
+    }
+
+    vec3 ret = vec3(0);
+    for (int i = 0; i < kernel_size; ++i) {
+#ifdef INVERSE
+        ret += values_lp[i] * kernel[i];
+        ret += values[i] * kernel[i + kernel_size];
+#else
+        ret += values[i] * kernel[i + kernel_size * is_hp_side];
+#endif
+    }
+#ifdef INVERSE
+    imageStore(wavelet_transformed[next_axis], ivec2(coord), vec4(ret, 1));
+#else
+    imageStore(wavelet_transformed[coord.z + frame_count * axis], coord_half + offset, vec4(ret, 1));
+#endif
+}
